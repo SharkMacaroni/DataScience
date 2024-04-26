@@ -1,0 +1,173 @@
+---
+title: "New York Shooting Deaths - A Time Analysis"
+
+date: "2024-04-15"
+output: pdf_document
+---
+
+## Description
+
+**A Simple Demonstration of the Relationship Between Temperature and Homicide** -
+Most people that have taken a psychology or statistics class will have 
+heard the anecdote of ice cream sales rising and falling with homicide rates. 
+This story is told as a cautionary tale of how correlation does not always equal 
+causation. The ice cream sales and homicide rates actually rise and fall due to 
+the temperature outside in the tale. When examining the data set, it was apparent 
+that this relationship could be easily shown if true. Will shooting deaths rise 
+and fall with the local recorded temperature?
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(formatR)
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+
+## R Markdown
+
+This information is provided from the City of New York Open Data website (https://data.cityofnewyork.us) regarding shooting death incidents.
+
+```{r download}
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+ny_shooting_deaths_data <- read_csv(url)
+summary(ny_shooting_deaths_data)
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+
+## Transforming the Data by Year
+```{r data transform, include=TRUE}
+ny_shooting_deaths_data <- ny_shooting_deaths_data %>% 
+  mutate(OCCUR_DATE=as.Date(OCCUR_DATE, format = "%m/%d/%Y"))
+
+ny_shooting_deaths_by_year <- ny_shooting_deaths_data %>% 
+  group_by(incident_year = lubridate::floor_date(OCCUR_DATE, 'year')) %>% 
+  summarize(n())
+
+names(ny_shooting_deaths_by_year)[names(ny_shooting_deaths_by_year)=="n()"] <- "number_of_deaths"
+
+
+ny_shooting_deaths_by_year %>% mutate(incident_year = year(incident_year))
+
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+## Plotting the Number of Shootings by Year
+```{r data graph, include=TRUE}
+bar_graph_year <- ny_shooting_deaths_by_year %>% ggplot(aes(x=incident_year,y=number_of_deaths)) + 
+geom_bar(stat="sum",color="blue",width=.3, position=position_dodge(width=.6), show.legend=FALSE) +
+  scale_x_date(date_breaks = "1 year", date_labels =  "%Y", guide = guide_axis(angle=45)) + 
+  ylab("Total Shooting Deaths") + xlab("Year") + ggtitle("City of New York Shooting Deaths", subtitle = "Total by Year for 17 Years")
+
+print(bar_graph_year)
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+
+## Transforming the Data by Month
+```{r data group by month, include=TRUE}
+ny_shooting_deaths_by_month <- ny_shooting_deaths_data %>% 
+  group_by(incident_month = lubridate::floor_date(OCCUR_DATE, 'month')) %>% 
+  summarize(n())
+
+names(ny_shooting_deaths_by_month)[names(ny_shooting_deaths_by_month)=="n()"] <- "number_of_deaths"
+
+ny_shooting_deaths_avg_by_month <- aggregate(number_of_deaths ~ 
+month(incident_month, label=TRUE),ny_shooting_deaths_by_month, mean)
+
+names(ny_shooting_deaths_avg_by_month)[names(ny_shooting_deaths_avg_by_month)=="month(incident_month, label = TRUE)"] <- "incident_month"
+
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+## Plotting the Data by Month
+```{r data graph month, include=TRUE}
+bar_graph_month <- ny_shooting_deaths_avg_by_month %>% ggplot(aes(x=incident_month,y=number_of_deaths)) + 
+     geom_bar(stat="identity",color="green",width=.3, position=position_dodge(width=.6), show.legend=FALSE) + 
+     ylab("Average Number of Shooting Deaths") + xlab("Month") + geom_text(aes(label=round(number_of_deaths,0), vjust=0)) + ggtitle("City of New York Shooting Deaths", subtitle = "Average by Month for 17 Years")
+ 
+print(bar_graph_month)
+
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+
+## Linear Model for Temperature vs Shooting Deaths
+
+The weather data in this section also came from the City of New York Open Data
+Website. The data set is demonstrating the current baseline temperatures by month
+for New York City while also predicting future temperatures due to climate change.
+By extracting the baseline temperatures, one can use this data set to understand 
+the relationship between shooting deaths and average temperature.
+```{r linear model, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+weather_url = "https://data.cityofnewyork.us/api/views/hmdk-eidg/rows.csv?accessType=DOWNLOAD"
+
+ny_weather_data <- read_csv(weather_url)
+
+ny_weather <- ny_weather_data[ny_weather_data$Year == 'Baseline',]
+
+ny_weather_temps <- ny_weather[ny_weather$`Month/Period`!= 'Annual' & 
+ny_weather$`Month/Period`!= 'Winter' & 
+  ny_weather$`Month/Period`!= 'Spring' & 
+  ny_weather$`Month/Period`!= 'Summer' & ny_weather$`Month/Period`!= 'Fall',]
+
+names(ny_weather_temps)[names(ny_weather_temps)=="Month/Period"] <- "Month"
+
+names(ny_weather_temps)[names(ny_weather_temps)=="Mean Temperature"] <- "Mean_Temp"
+
+
+ny_weather_temps <- ny_weather_temps %>% mutate(Mean_Temp = as.numeric(substr(Mean_Temp,1,4)))
+
+
+ny_weather_temps <- ny_weather_temps %>% mutate(Month=substring(Month,1,3))
+
+ny_weather_temps <- tibble::rowid_to_column(ny_weather_temps, "id")
+ny_shooting_deaths_avg_by_month <- tibble::rowid_to_column(ny_shooting_deaths_avg_by_month, "id")
+
+ny_weather_and_shooting_deaths <- merge(ny_shooting_deaths_avg_by_month, ny_weather_temps)
+
+
+mod <- lm(number_of_deaths ~ Mean_Temp, data=ny_weather_and_shooting_deaths)
+
+number_of_deaths_w_pred <- ny_weather_and_shooting_deaths %>% mutate(pred = predict(mod))
+
+number_of_deaths_w_pred %>% ggplot() + geom_point(aes(x = Mean_Temp, 
+                              y= number_of_deaths, color="Actual")) +  
+geom_point(aes(x = Mean_Temp, y= pred, color="Predicted")) + 
+  ylab("Number of Deaths") + 
+  xlab("Average Daily Temperature in Farenheit") +
+  ggtitle("Predicting Number of Shootings by Average Temperature", 
+        subtitle = "Comparing Monthly Averages")
+
+
+scatter.smooth(ny_weather_temps$Mean_Temp, 
+               ny_shooting_deaths_avg_by_month$number_of_deaths,
+               main='Shooting Deaths and Higher Temperatures',
+               xlab = "Average Temperature by Month in Fahrenheit", 
+ylab = "Average Shooting Deaths by Month for 17 Years")
+
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+
+## Bias Writeup
+
+**Possible Bias Present in Visual Plot** -
+The total population at the time of the incident is not included in the number of 
+shooting deaths data set. This information is better reported on a population 
+percentage basis rather than just a total. If the change in the number of shooting 
+deaths correlates with a change in population size, the increase or decrease in 
+shooting deaths becomes less substantial.
+
+**Possible Bias in Original Data Set** -
+The original data set includes races of the victim and the perpetrator, but does 
+not include an income bracket or a census block group description. Violent crimes 
+often disproportionately affect people in lower income areas. Depending on where 
+the incident occurred geographically, these areas may have a higher percentage of 
+a specific race. A Borough is likely not the best delineation for the location 
+of a violent incident as it is nonspecific. The latitude and longitude coordinates 
+provided in the data set could be used to extrapolate census block group data. 
+This could allow for a more thorough understanding of problems in that part of 
+New York City that exacerbate violence. 
+
+
+## Add Session Info
+```{r data, include=TRUE}
+sessionInfo()
+```
